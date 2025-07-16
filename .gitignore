@@ -78,8 +78,61 @@ jspm_packages/
 # FuseBox cache
 .fusebox/
 
+# Test files
+test/
+
 # DynamoDB Local files
 .dynamodb/
 
 # TernJS port file
-.tern-port 
+.tern-port
+
+# Deployment files and configurations
+deployment-config.json
+deployment-config.*.json
+deployments/
+deployments/*.json
+*deployment*.json
+*-deployment-*.json
+
+# Hardhat configuration (if contains sensitive data)
+hardhat.config.js
+hardhat.config.ts
+hardhat.config.local.js
+hardhat.config.local.ts
+
+# Deployment scripts with sensitive data
+scripts/deploy*.js
+scripts/verify*.js
+scripts/*deployment*.js
+scripts/utils/
+scripts/check-*
+scripts/*-query-*
+scripts/deploy.js
+# Deployment documentation (may contain sensitive addresses/keys)
+SETUP.md
+DEPLOYMENT.md
+MAINNET_DEPLOYMENT_GUIDE.md
+MAINNET_DEPLOYMENT_REVIEW.md
+*DEPLOYMENT*.md
+*deployment*.md
+VERIFICATION_ISSUES.md
+BASE_SEPOLIA_VERIFICATION.md
+
+# Encoded arguments (often contain sensitive deployment data)
+encoded-args/
+*.args.txt
+*-args.txt
+*-verification.json
+
+# Network specific files
+.openzeppelin/
+.chainlink/
+
+# Verification artifacts
+verification/
+*verification*
+
+# Gas reports
+gas-report.txt
+.gas-report.json

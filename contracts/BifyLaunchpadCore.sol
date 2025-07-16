@@ -21,6 +21,14 @@ import "./libraries/BifyWhitelistManager.sol";
 import "./libraries/BifyCollectionFactory.sol";
 
 /**
+ * @title IBifyMarketplace
+ * @dev Interface for marketplace collection registration
+ */
+interface IBifyMarketplace {
+    function registerLaunchpadCollection(address _collection) external;
+}
+
+/**
  * @title BifyLaunchpadCore
  * @dev Core functionality for the launchpad, optimized for contract size
  */
@@ -96,6 +104,7 @@ contract BifyLaunchpadCore is Ownable, ReentrancyGuard, Pausable {
     address private _feeRecipient;
     address private _bifyToken;
     uint256 private _bifyFee;
+    address private _marketplaceAddress;
 
     /**
      * @dev Constructor - only stores references but doesn't modify storage yet
@@ -264,6 +273,9 @@ contract BifyLaunchpadCore is Ownable, ReentrancyGuard, Pausable {
         // Increment collection count
         _getStorage().incrementCollectionCount();
 
+        // Register with marketplace for fee differentiation
+        _registerWithMarketplace(collectionAddress);
+
         emit CollectionCreated(
             msg.sender,
             collectionAddress,
@@ -371,6 +383,40 @@ contract BifyLaunchpadCore is Ownable, ReentrancyGuard, Pausable {
         address oldAddress = address(_getStorage().bifyToken());
         _getStorage().setBifyToken(_token);
         emit BifyTokenUpdated(oldAddress, _token);
+    }
+
+    /**
+     * @notice Set the marketplace address for automatic collection registration
+     * @param _marketplace Address of the BifyMarketplace contract
+     */
+    function setMarketplaceAddress(address _marketplace) external onlyOwner {
+        require(_marketplace != address(0), "Invalid marketplace address");
+        _marketplaceAddress = _marketplace;
+    }
+
+    /**
+     * @notice Get the current marketplace address
+     * @return The marketplace address
+     */
+    function getMarketplaceAddress() external view returns (address) {
+        return _marketplaceAddress;
+    }
+
+    /**
+     * @dev Internal function to register collection with marketplace
+     * @param _collection Address of the collection to register
+     */
+    function _registerWithMarketplace(address _collection) internal {
+        if (_marketplaceAddress != address(0)) {
+            try
+                IBifyMarketplace(_marketplaceAddress)
+                    .registerLaunchpadCollection(_collection)
+            {
+                // Collection registered successfully
+            } catch {
+                // Registration failed silently - don't revert collection creation
+            }
+        }
     }
 
     /**
@@ -538,6 +584,9 @@ contract BifyLaunchpadCore is Ownable, ReentrancyGuard, Pausable {
 
         // Increment collection count
         _getStorage().incrementCollectionCount();
+
+        // Register with marketplace for fee differentiation
+        _registerWithMarketplace(collectionAddress);
 
         // Emit events
         emit CollectionCreated(
@@ -728,6 +777,9 @@ contract BifyLaunchpadCore is Ownable, ReentrancyGuard, Pausable {
 
         // Increment collection count
         _getStorage().incrementCollectionCount();
+
+        // Register with marketplace for fee differentiation
+        _registerWithMarketplace(collectionAddress);
 
         emit CollectionCreated(
             _creator,

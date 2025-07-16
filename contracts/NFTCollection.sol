@@ -542,7 +542,8 @@ contract NFTCollection is ERC721Enumerable, ERC2981, Ownable, ReentrancyGuard {
 
         if (revealStrategy == RevealStrategy.RANDOMIZED && seedSet) {
             uint256 finalId = _finalTokenIds[tokenId];
-            return string(abi.encodePacked(baseURI, finalId.toString()));
+            return
+                string(abi.encodePacked(baseURI, finalId.toString(), ".json"));
         } else if (revealStrategy == RevealStrategy.DYNAMIC) {
             string memory customURI = _tokenURIs[tokenId];
             if (bytes(customURI).length > 0) {
@@ -550,7 +551,7 @@ contract NFTCollection is ERC721Enumerable, ERC2981, Ownable, ReentrancyGuard {
             }
         }
 
-        return string(abi.encodePacked(baseURI, tokenId.toString()));
+        return string(abi.encodePacked(baseURI, tokenId.toString(), ".json"));
     }
 
     /**

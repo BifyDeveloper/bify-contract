@@ -6,12 +6,24 @@
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test",
-    "deploy": "hardhat run scripts/deploy.js",
     "deploy:local": "hardhat run scripts/deploy.js --network localhost",
-    "deploy:sepolia": "hardhat run scripts/deploy.js --network sepolia",
     "deploy:base-sepolia": "hardhat run scripts/deploy.js --network baseSepolia",
-    "deploy:mainnet": "hardhat run scripts/deploy.js --network mainnet",
+    "deploy:base": "hardhat run scripts/deploy.js --network base",
+    "deploy:marketplace:local": "hardhat run scripts/deploy-marketplace.js --network localhost",
+    "deploy:marketplace:base-sepolia": "hardhat run scripts/deploy-marketplace.js --network baseSepolia",
+    "deploy:marketplace:base": "hardhat run scripts/deploy-marketplace.js --network base",
+    "deploy:launchpad:local": "hardhat run scripts/deploy-launchpad.js --network localhost",
+    "deploy:launchpad:base-sepolia": "hardhat run scripts/deploy-launchpad.js --network baseSepolia",
+    "deploy:launchpad:base": "hardhat run scripts/deploy-launchpad.js --network base",
     "verify": "hardhat verify",
+    "verify:contracts": "hardhat run scripts/verify-contracts.js",
+    "verify:contracts:mainnet": "hardhat run scripts/verify-contracts.js --network mainnet",
+    "verify:contracts:sepolia": "hardhat run scripts/verify-contracts.js --network sepolia",
+    "verify:contracts:base-sepolia": "hardhat run scripts/verify-contracts.js --network baseSepolia",
+    "verify:contracts:base": "hardhat run scripts/verify-contracts.js --network base",
+    "verify:marketplace:base-sepolia": "hardhat run scripts/verify-contracts.js --network baseSepolia -- --type marketplace",
+    "verify:launchpad:base-sepolia": "hardhat run scripts/verify-contracts.js --network baseSepolia -- --type launchpad",
+    "test:verification:base-sepolia": "hardhat run scripts/test-verification.js --network baseSepolia",
     "node": "hardhat node",
     "clean": "hardhat clean",
     "coverage": "hardhat coverage"
@@ -26,10 +38,10 @@
   "author": "Bify Team",
   "license": "MIT",
   "devDependencies": {
-    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
-    "@nomicfoundation/hardhat-network-helpers": "^1.0.8",
     "@nomicfoundation/hardhat-chai-matchers": "^2.0.2",
     "@nomicfoundation/hardhat-ethers": "^3.0.5",
+    "@nomicfoundation/hardhat-network-helpers": "^1.0.8",
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
     "@nomicfoundation/hardhat-verify": "^2.0.1",
     "@typechain/ethers-v6": "^0.5.0",
     "@typechain/hardhat": "^9.1.0",
@@ -38,11 +50,13 @@
     "chai": "^4.3.7",
     "ethers": "^6.8.1",
     "hardhat": "^2.19.4",
+    "hardhat-contract-sizer": "^2.10.0",
     "hardhat-gas-reporter": "^1.0.9",
     "solidity-coverage": "^0.8.5",
     "typechain": "^8.3.2"
   },
   "dependencies": {
-    "@openzeppelin/contracts": "^5.0.1"
+    "@openzeppelin/contracts": "4.9.3",
+    "dotenv": "^17.1.0"
   }
 }

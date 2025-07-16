@@ -81,7 +81,9 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
     }
 
     address public platformFeeRecipient;
-    uint256 public platformFeePercentage = 25;
+    uint256 public standardPlatformFeePercentage = 5; // 0.5% for regular marketplace NFTs
+    uint256 public launchpadPlatformFeePercentage = 50; // 5% for launchpad-created NFTs
+    uint256 public platformFeePercentage = 5; // Deprecated - keeping for backward compatibility
     uint256 public bidDepositPercentage = 50;
     uint256 public constant ANTI_SNIPE_TIME = 10 minutes;
     uint256 public minRoyaltyPercentage = 50;
@@ -104,7 +106,10 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
     mapping(uint256 => FixedPriceListing) public fixedPriceListings;
     mapping(address => mapping(uint256 => address)) public tokenCreators;
     mapping(address => uint256) public pendingWithdrawals;
-    mapping(uint256 => mapping(address => uint256)) public bidDeposits;
+
+    // Launchpad collection registry for fee differentiation
+    mapping(address => bool) public launchpadCollections;
+
     mapping(uint256 => BidInfo[]) public bidHistory;
     mapping(uint256 => mapping(address => uint256)) public maxBids;
 
@@ -168,12 +173,6 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
         PaymentMethod paymentMethod
     );
 
-    event DepositForfeited(
-        uint256 indexed auctionId,
-        address indexed bidder,
-        uint256 amount
-    );
-
     event RoyaltyPaid(address indexed creator, uint256 amount);
 
     event WithdrawalMade(address indexed user, uint256 amount);
@@ -225,6 +224,25 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
         uint256 oldBuyNowPrice,
         uint256 newBuyNowPrice
     );
+
+    event PlatformFeePercentageUpdated(
+        uint256 oldPercentage,
+        uint256 newPercentage
+    );
+    event PlatformFeeRecipientUpdated(
+        address oldRecipient,
+        address newRecipient
+    );
+    event StandardFeePercentageUpdated(
+        uint256 oldPercentage,
+        uint256 newPercentage
+    );
+    event LaunchpadFeePercentageUpdated(
+        uint256 oldPercentage,
+        uint256 newPercentage
+    );
+    event LaunchpadCollectionRegistered(address indexed collection);
+    event LaunchpadCollectionUnregistered(address indexed collection);
 
     /**
      * @dev Constructor
@@ -368,14 +386,6 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
             abi.encodePacked(listingId, "fixed", block.timestamp)
         );
 
-        require(
-            bifyToken.transferFrom(
-                msg.sender,
-                address(tokenPaymentProcessor),
-                listing.price
-            ),
-            "Token transfer to payment processor failed"
-        );
         bool paymentSuccess = tokenPaymentProcessor.processPayment(
             msg.sender,
             listing.seller,
@@ -588,6 +598,12 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
         );
 
         if (isBuyNow) {
+            emit BuyNowPurchase(
+                auctionId,
+                msg.sender,
+                auction.buyNowPrice,
+                PaymentMethod.BIFY
+            );
             _settleTokenAuction(auctionId);
         }
     }
@@ -614,6 +630,13 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
             auction.paymentMethod == PaymentMethod.BIFY,
             "Not a token payment auction"
         );
+
+        if (auction.highestBidder != address(0)) {
+            require(
+                bifyToken.transfer(auction.highestBidder, auction.highestBid),
+                "Token refund to previous bidder failed"
+            );
+        }
 
         require(
             bifyToken.transferFrom(
@@ -724,9 +747,12 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
         uint256 saleAmount = auction.highestBid;
         address creator = tokenCreators[auction.nftContract][auction.tokenId];
 
-        uint256 platformFee = saleAmount.mul(platformFeePercentage).div(
-            BASIS_POINTS
-        );
+        // Determine fee percentage based on whether NFT is from launchpad
+        uint256 feePercentage = launchpadCollections[auction.nftContract]
+            ? launchpadPlatformFeePercentage
+            : standardPlatformFeePercentage;
+
+        uint256 platformFee = saleAmount.mul(feePercentage).div(BASIS_POINTS);
         uint256 royaltyAmount = 0;
 
         if (creator != address(0) && creator != auction.seller) {
@@ -804,6 +830,64 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
             bifyToken.transfer(msg.sender, balance),
             "Token withdrawal failed"
         );
+    }
+
+    function updatePlatformFeePercentage(
+        uint256 _newPercentage
+    ) external onlyOwner {
+        require(_newPercentage <= 100, "Fee cannot exceed 10%");
+        uint256 oldPercentage = platformFeePercentage;
+        platformFeePercentage = _newPercentage;
+        emit PlatformFeePercentageUpdated(oldPercentage, _newPercentage);
+    }
+
+    function updatePlatformFeeRecipient(
+        address _newRecipient
+    ) external onlyOwner {
+        require(_newRecipient != address(0), "Invalid recipient address");
+        address oldRecipient = platformFeeRecipient;
+        platformFeeRecipient = _newRecipient;
+        emit PlatformFeeRecipientUpdated(oldRecipient, _newRecipient);
+    }
+
+    function updateStandardFeePercentage(
+        uint256 _newPercentage
+    ) external onlyOwner {
+        require(_newPercentage <= 50, "Standard fee cannot exceed 5%");
+        uint256 oldPercentage = standardPlatformFeePercentage;
+        standardPlatformFeePercentage = _newPercentage;
+        emit StandardFeePercentageUpdated(oldPercentage, _newPercentage);
+    }
+
+    function updateLaunchpadFeePercentage(
+        uint256 _newPercentage
+    ) external onlyOwner {
+        require(_newPercentage <= 100, "Launchpad fee cannot exceed 10%");
+        uint256 oldPercentage = launchpadPlatformFeePercentage;
+        launchpadPlatformFeePercentage = _newPercentage;
+        emit LaunchpadFeePercentageUpdated(oldPercentage, _newPercentage);
+    }
+
+    function registerLaunchpadCollection(
+        address _collection
+    ) external onlyOwner {
+        require(_collection != address(0), "Invalid collection address");
+        launchpadCollections[_collection] = true;
+        emit LaunchpadCollectionRegistered(_collection);
+    }
+
+    function unregisterLaunchpadCollection(
+        address _collection
+    ) external onlyOwner {
+        require(_collection != address(0), "Invalid collection address");
+        launchpadCollections[_collection] = false;
+        emit LaunchpadCollectionUnregistered(_collection);
+    }
+
+    function isLaunchpadCollection(
+        address _collection
+    ) external view returns (bool) {
+        return launchpadCollections[_collection];
     }
 
     /**
@@ -1050,10 +1134,6 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
             require(bidAmount >= auction.reservePrice, "Below reserve price");
         }
 
-        uint256 depositRequired = bidAmount.mul(bidDepositPercentage).div(
-            BASIS_POINTS
-        );
-
         bool isBuyNow = false;
         if (auction.buyNowPrice > 0 && bidAmount >= auction.buyNowPrice) {
             bidAmount = auction.buyNowPrice;
@@ -1066,8 +1146,6 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
 
         auction.highestBidder = msg.sender;
         auction.highestBid = bidAmount;
-
-        bidDeposits[auctionId][msg.sender] = depositRequired;
 
         bidHistory[auctionId].push(
             BidInfo({
@@ -1098,6 +1176,12 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
         );
 
         if (isBuyNow) {
+            emit BuyNowPurchase(
+                auctionId,
+                msg.sender,
+                auction.buyNowPrice,
+                PaymentMethod.ETH
+            );
             _settleAuction(auctionId);
         }
     }
@@ -1119,6 +1203,10 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
             "Not an ETH payment auction"
         );
         require(msg.value == auction.buyNowPrice, "Incorrect ETH amount");
+
+        if (auction.highestBidder != address(0)) {
+            pendingWithdrawals[auction.highestBidder] += auction.highestBid;
+        }
 
         auction.highestBidder = msg.sender;
         auction.highestBid = auction.buyNowPrice;
@@ -1231,9 +1319,12 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
     ) internal {
         address creator = tokenCreators[nftContract][tokenId];
 
-        uint256 platformFee = saleAmount.mul(platformFeePercentage).div(
-            BASIS_POINTS
-        );
+        // Determine fee percentage based on whether NFT is from launchpad
+        uint256 feePercentage = launchpadCollections[nftContract]
+            ? launchpadPlatformFeePercentage
+            : standardPlatformFeePercentage;
+
+        uint256 platformFee = saleAmount.mul(feePercentage).div(BASIS_POINTS);
         uint256 royaltyAmount = 0;
 
         if (creator != address(0) && creator != seller) {
@@ -1336,7 +1427,7 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
     function setMaxBid(
         uint256 auctionId,
         uint256 maxBidAmount
-    ) external payable nonReentrant whenNotPaused {
+    ) external nonReentrant whenNotPaused {
         Auction storage auction = auctions[auctionId];
 
         require(auction.status == AuctionStatus.Active, "Auction not active");
@@ -1347,15 +1438,6 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
         require(maxBidAmount > auction.highestBid, "Max bid too low");
 
         maxBids[auctionId][msg.sender] = maxBidAmount;
-
-        uint256 currentDeposit = msg.value;
-
-        uint256 requiredDeposit = maxBidAmount.mul(bidDepositPercentage).div(
-            BASIS_POINTS
-        );
-        require(currentDeposit >= requiredDeposit, "Insufficient deposit");
-
-        bidDeposits[auctionId][msg.sender] = currentDeposit;
 
         emit MaxBidSet(auctionId, msg.sender, maxBidAmount, PaymentMethod.ETH);
     }
