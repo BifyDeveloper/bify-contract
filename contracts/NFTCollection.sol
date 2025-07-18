@@ -475,6 +475,7 @@ contract NFTCollection is ERC721Enumerable, ERC2981, Ownable, ReentrancyGuard {
         address _receiver,
         uint96 _feeNumerator
     ) external onlyOwner {
+        require(_feeNumerator <= 1000, "Royalty cannot exceed 10%");
         _setDefaultRoyalty(_receiver, _feeNumerator);
     }
 

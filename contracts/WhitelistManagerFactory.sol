@@ -40,6 +40,31 @@ contract WhitelistManagerFactory is Ownable {
     }
 
     /**
+     * @notice Create a new WhitelistManagerExtended instance with specific owner
+     * @param _name Name for the whitelist
+     * @param _owner Target owner for the whitelist manager
+     * @return managerAddress Address of the created whitelist manager
+     */
+    function createWhitelistManagerForOwner(
+        string memory _name,
+        address _owner
+    ) external returns (address managerAddress) {
+        require(_owner != address(0), "Invalid owner address");
+
+        WhitelistManagerExtended manager = new WhitelistManagerExtended(_name);
+
+        manager.transferOwnership(_owner);
+
+        managerAddress = address(manager);
+        creatorManagers[_owner].push(managerAddress);
+        allManagers.push(managerAddress);
+
+        emit WhitelistManagerCreated(_owner, managerAddress, _name);
+
+        return managerAddress;
+    }
+
+    /**
      * @notice Get all whitelist managers created by an address
      * @param _creator Creator address
      * @return Array of whitelist manager addresses

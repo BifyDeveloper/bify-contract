@@ -7,6 +7,8 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/interfaces/IERC2981.sol";
+import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import "./MarketplaceQuery.sol";
 import "./BifyTokenPayment.sol";
 import "./libraries/MarketplaceValidation.sol";
@@ -86,6 +88,7 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
     uint256 public platformFeePercentage = 5; // Deprecated - keeping for backward compatibility
     uint256 public bidDepositPercentage = 50;
     uint256 public constant ANTI_SNIPE_TIME = 10 minutes;
+    uint256 public constant MIN_BID_INCREMENT_PERCENTAGE = 25;
     uint256 public minRoyaltyPercentage = 50;
     uint256 public maxRoyaltyPercentage = 100;
     uint256 public constant BASIS_POINTS = 1000;
@@ -109,6 +112,9 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
 
     // Launchpad collection registry for fee differentiation
     mapping(address => bool) public launchpadCollections;
+
+    // Add authorized registrars mapping for launchpad integration
+    mapping(address => bool) public authorizedRegistrars;
 
     mapping(uint256 => BidInfo[]) public bidHistory;
     mapping(uint256 => mapping(address => uint256)) public maxBids;
@@ -243,6 +249,10 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
     );
     event LaunchpadCollectionRegistered(address indexed collection);
     event LaunchpadCollectionUnregistered(address indexed collection);
+    event AuthorizedRegistrarUpdated(
+        address indexed registrar,
+        bool authorized
+    );
 
     /**
      * @dev Constructor
@@ -304,8 +314,11 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
 
         require(nftContract != address(0), "Invalid NFT contract");
         require(price > 0, "Price must be > 0");
+        uint256 collectionMinRoyalty = getMinimumRoyaltyForCollection(
+            nftContract
+        );
         require(
-            royaltyPercentage >= minRoyaltyPercentage &&
+            royaltyPercentage >= collectionMinRoyalty &&
                 royaltyPercentage <= maxRoyaltyPercentage,
             "Invalid royalty percentage"
         );
@@ -444,8 +457,11 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
             buyNowPrice == 0 || buyNowPrice >= reservePrice,
             "BuyNow must exceed reserve"
         );
+        uint256 collectionMinRoyalty = getMinimumRoyaltyForCollection(
+            nftContract
+        );
         require(
-            royaltyPercentage >= minRoyaltyPercentage &&
+            royaltyPercentage >= collectionMinRoyalty &&
                 royaltyPercentage <= maxRoyaltyPercentage,
             "Invalid royalty percentage"
         );
@@ -543,7 +559,10 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
         );
 
         if (auction.highestBid > 0) {
-            require(bidAmount > auction.highestBid, "Bid too low");
+            uint256 minIncrement = (auction.highestBid *
+                MIN_BID_INCREMENT_PERCENTAGE) / BASIS_POINTS;
+            uint256 minBidAmount = auction.highestBid + minIncrement;
+            require(bidAmount >= minBidAmount, "Bid increment too small");
         } else {
             require(bidAmount >= auction.reservePrice, "Below reserve price");
         }
@@ -807,13 +826,78 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
     }
 
     /**
+     * @dev Get the minimum royalty percentage for a collection
+     * @param nftContract The NFT contract address
+     * @return minRoyalty The minimum royalty percentage to enforce
+     */
+    function getMinimumRoyaltyForCollection(
+        address nftContract
+    ) public view returns (uint256 minRoyalty) {
+        minRoyalty = minRoyaltyPercentage;
+
+        if (
+            IERC165(nftContract).supportsInterface(type(IERC2981).interfaceId)
+        ) {
+            try IERC2981(nftContract).royaltyInfo(0, 10000) returns (
+                address,
+                uint256 royaltyAmount
+            ) {
+                uint256 collectionRoyalty = (royaltyAmount * BASIS_POINTS) /
+                    10000;
+                if (collectionRoyalty > minRoyalty) {
+                    minRoyalty = collectionRoyalty;
+                }
+            } catch {}
+        }
+
+        return minRoyalty;
+    }
+
+    /**
+     * @dev Calculate total ETH locked in active auctions
+     */
+    function getLockedETH() public view returns (uint256 totalLocked) {
+        for (uint256 i = 0; i < auctionIdCounter; i++) {
+            Auction storage auction = auctions[i];
+            if (
+                auction.status == AuctionStatus.Active &&
+                auction.paymentMethod == PaymentMethod.ETH &&
+                auction.highestBid > 0
+            ) {
+                totalLocked += auction.highestBid;
+            }
+        }
+        return totalLocked;
+    }
+
+    /**
+     * @dev Calculate total BIFY tokens locked in active auctions
+     */
+    function getLockedBIFY() public view returns (uint256 totalLocked) {
+        for (uint256 i = 0; i < auctionIdCounter; i++) {
+            Auction storage auction = auctions[i];
+            if (
+                auction.status == AuctionStatus.Active &&
+                auction.paymentMethod == PaymentMethod.BIFY &&
+                auction.highestBid > 0
+            ) {
+                totalLocked += auction.highestBid;
+            }
+        }
+        return totalLocked;
+    }
+
+    /**
      * @dev Emergency withdraw function for stuck ETH
      */
     function emergencyWithdraw() external onlyOwner {
         uint256 balance = address(this).balance;
-        require(balance > 0, "No ETH to withdraw");
+        uint256 lockedETH = getLockedETH();
+        uint256 availableETH = balance > lockedETH ? balance - lockedETH : 0;
 
-        (bool success, ) = msg.sender.call{value: balance}("");
+        require(availableETH > 0, "No available ETH to withdraw");
+
+        (bool success, ) = msg.sender.call{value: availableETH}("");
         require(success, "Withdrawal failed");
     }
 
@@ -824,10 +908,13 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
         require(address(bifyToken) != address(0), "BIFY token not configured");
 
         uint256 balance = bifyToken.balanceOf(address(this));
-        require(balance > 0, "No tokens to withdraw");
+        uint256 lockedBIFY = getLockedBIFY();
+        uint256 availableBIFY = balance > lockedBIFY ? balance - lockedBIFY : 0;
+
+        require(availableBIFY > 0, "No available tokens to withdraw");
 
         require(
-            bifyToken.transfer(msg.sender, balance),
+            bifyToken.transfer(msg.sender, availableBIFY),
             "Token withdrawal failed"
         );
     }
@@ -868,14 +955,38 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
         emit LaunchpadFeePercentageUpdated(oldPercentage, _newPercentage);
     }
 
-    function registerLaunchpadCollection(
-        address _collection
+    /**
+     * @dev Set authorized registrar for launchpad collections
+     * @param _registrar Address to authorize/unauthorize
+     * @param _authorized Whether to authorize or revoke authorization
+     */
+    function setAuthorizedRegistrar(
+        address _registrar,
+        bool _authorized
     ) external onlyOwner {
+        require(_registrar != address(0), "Invalid registrar address");
+        authorizedRegistrars[_registrar] = _authorized;
+        emit AuthorizedRegistrarUpdated(_registrar, _authorized);
+    }
+
+    /**
+     * @dev Register a launchpad collection - callable by owner or authorized registrars
+     * @param _collection Collection address to register
+     */
+    function registerLaunchpadCollection(address _collection) external {
+        require(
+            msg.sender == owner() || authorizedRegistrars[msg.sender],
+            "Not authorized to register collections"
+        );
         require(_collection != address(0), "Invalid collection address");
         launchpadCollections[_collection] = true;
         emit LaunchpadCollectionRegistered(_collection);
     }
 
+    /**
+     * @dev Unregister a launchpad collection - only owner can unregister
+     * @param _collection Collection address to unregister
+     */
     function unregisterLaunchpadCollection(
         address _collection
     ) external onlyOwner {
@@ -910,8 +1021,11 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
     ) external whenNotPaused nonReentrant returns (uint256 listingId) {
         require(nftContract != address(0), "Invalid NFT contract");
         require(price > 0, "Price must be > 0");
+        uint256 collectionMinRoyalty = getMinimumRoyaltyForCollection(
+            nftContract
+        );
         require(
-            royaltyPercentage >= minRoyaltyPercentage &&
+            royaltyPercentage >= collectionMinRoyalty &&
                 royaltyPercentage <= maxRoyaltyPercentage,
             "Invalid royalty percentage"
         );
@@ -1035,8 +1149,11 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
             buyNowPrice == 0 || buyNowPrice >= reservePrice,
             "BuyNow must exceed reserve"
         );
+        uint256 collectionMinRoyalty = getMinimumRoyaltyForCollection(
+            nftContract
+        );
         require(
-            royaltyPercentage >= minRoyaltyPercentage &&
+            royaltyPercentage >= collectionMinRoyalty &&
                 royaltyPercentage <= maxRoyaltyPercentage,
             "Invalid royalty percentage"
         );
@@ -1129,7 +1246,10 @@ contract BifyMarketplace is Ownable, ReentrancyGuard, Pausable {
         uint256 bidAmount = msg.value;
 
         if (auction.highestBid > 0) {
-            require(bidAmount > auction.highestBid, "Bid too low");
+            uint256 minIncrement = (auction.highestBid *
+                MIN_BID_INCREMENT_PERCENTAGE) / BASIS_POINTS;
+            uint256 minBidAmount = auction.highestBid + minIncrement;
+            require(bidAmount >= minBidAmount, "Bid increment too small");
         } else {
             require(bidAmount >= auction.reservePrice, "Below reserve price");
         }

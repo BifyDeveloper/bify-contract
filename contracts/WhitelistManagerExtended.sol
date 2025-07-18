@@ -13,13 +13,6 @@ contract WhitelistManagerExtended is Ownable, ReentrancyGuard {
     string public whitelistName;
     uint256 public createdAt;
 
-    enum TierLevel {
-        Invalid,
-        Tier1,
-        Tier2,
-        Tier3
-    }
-
     struct Tier {
         bytes32 merkleRoot;
         uint256 startTime;
@@ -32,7 +25,7 @@ contract WhitelistManagerExtended is Ownable, ReentrancyGuard {
     mapping(uint256 => Tier) public tiers;
     uint256 public tierCount;
 
-    mapping(address => TierLevel) public directWhitelist;
+    mapping(address => uint256) public directWhitelistTier;
 
     mapping(address => mapping(uint256 => uint256)) public mintCountByTier;
 
@@ -55,9 +48,11 @@ contract WhitelistManagerExtended is Ownable, ReentrancyGuard {
         bool active
     );
 
-    event DirectWhitelistAdded(address indexed user, TierLevel tier);
+    // Updated event to use uint256
+    event DirectWhitelistAdded(address indexed user, uint256 maxTierAccess);
 
-    event DirectWhitelistBatchAdded(uint256 userCount, TierLevel tier);
+    // Updated event to use uint256
+    event DirectWhitelistBatchAdded(uint256 userCount, uint256 maxTierAccess);
 
     event MintTracked(
         address indexed user,
@@ -166,42 +161,42 @@ contract WhitelistManagerExtended is Ownable, ReentrancyGuard {
     /**
      * @notice Add an address to the direct whitelist
      * @param _user Address to add
-     * @param _tier Tier level
+     * @param _maxTierAccess Maximum tier access level for this user (0 means not whitelisted)
      */
     function addToDirectWhitelist(
         address _user,
-        TierLevel _tier
+        uint256 _maxTierAccess
     ) external onlyOwner {
         require(_user != address(0), "Invalid address");
-        require(_tier != TierLevel.Invalid, "Cannot add with Invalid tier");
+        require(_maxTierAccess > 0, "Cannot add with maxTierAccess 0");
 
-        directWhitelist[_user] = _tier;
+        directWhitelistTier[_user] = _maxTierAccess;
 
-        emit DirectWhitelistAdded(_user, _tier);
+        emit DirectWhitelistAdded(_user, _maxTierAccess);
     }
 
     /**
      * @notice Batch add addresses to the direct whitelist
      * @param _users Array of addresses to add
-     * @param _tier Tier level for all addresses
+     * @param _maxTierAccess Maximum tier access level for all addresses (0 means not whitelisted)
      * @return successCount Number of successfully added addresses
      */
     function batchAddToDirectWhitelist(
         address[] calldata _users,
-        TierLevel _tier
+        uint256 _maxTierAccess
     ) external onlyOwner returns (uint256 successCount) {
-        require(_tier != TierLevel.Invalid, "Cannot add with Invalid tier");
+        require(_maxTierAccess > 0, "Cannot add with maxTierAccess 0");
 
         successCount = 0;
         for (uint256 i = 0; i < _users.length; i++) {
             address user = _users[i];
             if (user != address(0)) {
-                directWhitelist[user] = _tier;
+                directWhitelistTier[user] = _maxTierAccess;
                 successCount++;
             }
         }
 
-        emit DirectWhitelistBatchAdded(successCount, _tier);
+        emit DirectWhitelistBatchAdded(successCount, _maxTierAccess);
         return successCount;
     }
 
@@ -231,12 +226,12 @@ contract WhitelistManagerExtended is Ownable, ReentrancyGuard {
     /**
      * @notice Check if an address is directly whitelisted
      * @param _user Address to check
-     * @return tierLevel Tier level of the address (TierLevel.Invalid if not whitelisted)
+     * @return maxTierAccess Maximum tier access level for the address (0 means not whitelisted)
      */
     function getDirectWhitelistTier(
         address _user
-    ) public view returns (TierLevel) {
-        return directWhitelist[_user];
+    ) public view returns (uint256 maxTierAccess) {
+        return directWhitelistTier[_user];
     }
 
     /**
@@ -303,18 +298,14 @@ contract WhitelistManagerExtended is Ownable, ReentrancyGuard {
             return (false, 0);
         }
 
-        bool isUserWhitelisted = false;
-
-        TierLevel directTier = directWhitelist[_user];
-        if (directTier != TierLevel.Invalid) {
-            isUserWhitelisted = uint256(directTier) >= _tierId + 1;
+        uint256 userMaxTierAccess = directWhitelistTier[_user];
+        if (userMaxTierAccess > 0) {
+            if (userMaxTierAccess >= _tierId + 1) {
+                return (true, tier.price);
+            }
         }
 
-        if (!isUserWhitelisted) {
-            isUserWhitelisted = isWhitelistedInTier(_user, _tierId, _proof);
-        }
-
-        if (!isUserWhitelisted) {
+        if (!isWhitelistedInTier(_user, _tierId, _proof)) {
             return (false, 0);
         }
 
@@ -385,9 +376,11 @@ contract WhitelistManagerExtended is Ownable, ReentrancyGuard {
         uint256 _tierId,
         bytes32[] calldata _merkleProof
     ) external view returns (bool) {
-        if (directWhitelist[_user] != TierLevel.Invalid) {
-            uint256 userTierLevel = uint256(directWhitelist[_user]);
-            return userTierLevel >= _tierId + 1;
+        uint256 userMaxTierAccess = directWhitelistTier[_user];
+        if (userMaxTierAccess > 0) {
+            if (userMaxTierAccess >= _tierId + 1) {
+                return true;
+            }
         }
 
         if (_tierId < tierCount) {

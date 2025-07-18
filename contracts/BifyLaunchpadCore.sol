@@ -22,7 +22,7 @@ import "./libraries/BifyCollectionFactory.sol";
 
 /**
  * @title IBifyMarketplace
- * @dev Interface for marketplace collection registration
+ * @dev Interface for marketplace registration functions
  */
 interface IBifyMarketplace {
     function registerLaunchpadCollection(address _collection) external;
@@ -99,6 +99,13 @@ contract BifyLaunchpadCore is Ownable, ReentrancyGuard, Pausable {
         address indexed whitelistManager
     );
 
+    // Events for marketplace registration
+    event MarketplaceRegistrationSuccess(address indexed collection);
+    event MarketplaceRegistrationFailed(
+        address indexed collection,
+        string reason
+    );
+
     // Platform fee and token settings
     uint256 private _platformFee;
     address private _feeRecipient;
@@ -158,6 +165,18 @@ contract BifyLaunchpadCore is Ownable, ReentrancyGuard, Pausable {
      */
     modifier whenInitialized() {
         require(_initialized, "Not initialized");
+        _;
+    }
+
+    /**
+     * @notice Modifier to ensure caller is owner or authorized operator
+     */
+    modifier onlyOwnerOrAuthorized() {
+        require(
+            msg.sender == owner() ||
+                _getStorage().authorizedOperators(msg.sender),
+            "Not authorized"
+        );
         _;
     }
 
@@ -273,7 +292,7 @@ contract BifyLaunchpadCore is Ownable, ReentrancyGuard, Pausable {
         // Increment collection count
         _getStorage().incrementCollectionCount();
 
-        // Register with marketplace for fee differentiation
+        // Register with marketplace (emits events on success/failure)
         _registerWithMarketplace(collectionAddress);
 
         emit CollectionCreated(
@@ -338,7 +357,7 @@ contract BifyLaunchpadCore is Ownable, ReentrancyGuard, Pausable {
      * @notice Updates the platform fee
      * @param _newFee New fee amount
      */
-    function updatePlatformFee(uint256 _newFee) external onlyOwner {
+    function updatePlatformFee(uint256 _newFee) external onlyOwnerOrAuthorized {
         uint256 oldFee = _getStorage().platformFee();
         _getStorage().setPlatformFee(_newFee);
         emit PlatformFeeUpdated(oldFee, _newFee);
@@ -348,7 +367,7 @@ contract BifyLaunchpadCore is Ownable, ReentrancyGuard, Pausable {
      * @notice Updates the Bify token fee
      * @param _newFee New fee amount
      */
-    function updateBifyFee(uint256 _newFee) external onlyOwner {
+    function updateBifyFee(uint256 _newFee) external onlyOwnerOrAuthorized {
         uint256 oldFee = _getStorage().bifyFee();
         _getStorage().setBifyFee(_newFee);
         emit BifyFeeUpdated(oldFee, _newFee);
@@ -358,7 +377,9 @@ contract BifyLaunchpadCore is Ownable, ReentrancyGuard, Pausable {
      * @notice Updates the fee recipient
      * @param _newRecipient New recipient address
      */
-    function updateFeeRecipient(address _newRecipient) external onlyOwner {
+    function updateFeeRecipient(
+        address _newRecipient
+    ) external onlyOwnerOrAuthorized {
         require(_newRecipient != address(0), "Invalid address");
         address oldRecipient = _getStorage().feeRecipient();
         _getStorage().setFeeRecipient(_newRecipient);
@@ -369,7 +390,7 @@ contract BifyLaunchpadCore is Ownable, ReentrancyGuard, Pausable {
      * @notice Toggles Bify token payment
      * @param _enabled Whether to enable Bify payment
      */
-    function toggleBifyPayment(bool _enabled) external onlyOwner {
+    function toggleBifyPayment(bool _enabled) external onlyOwnerOrAuthorized {
         _getStorage().setAllowBifyPayment(_enabled);
         emit BifyPaymentToggled(_enabled);
     }
@@ -403,40 +424,23 @@ contract BifyLaunchpadCore is Ownable, ReentrancyGuard, Pausable {
     }
 
     /**
-     * @dev Internal function to register collection with marketplace
-     * @param _collection Address of the collection to register
-     */
-    function _registerWithMarketplace(address _collection) internal {
-        if (_marketplaceAddress != address(0)) {
-            try
-                IBifyMarketplace(_marketplaceAddress)
-                    .registerLaunchpadCollection(_collection)
-            {
-                // Collection registered successfully
-            } catch {
-                // Registration failed silently - don't revert collection creation
-            }
-        }
-    }
-
-    /**
      * @notice Pauses collection creation
      */
-    function pause() external onlyOwner {
+    function pause() external onlyOwnerOrAuthorized {
         _pause();
     }
 
     /**
      * @notice Unpauses collection creation
      */
-    function unpause() external onlyOwner {
+    function unpause() external onlyOwnerOrAuthorized {
         _unpause();
     }
 
     /**
      * @notice Emergency withdrawal in case ETH gets stuck
      */
-    function emergencyWithdraw() external onlyOwner {
+    function emergencyWithdraw() external onlyOwnerOrAuthorized {
         uint256 balance = address(this).balance;
         require(balance > 0, "No balance to withdraw");
         (bool success, ) = owner().call{value: balance}("");
@@ -447,7 +451,9 @@ contract BifyLaunchpadCore is Ownable, ReentrancyGuard, Pausable {
      * @notice Emergency withdrawal of any ERC20 tokens
      * @param _token Token address
      */
-    function emergencyWithdrawToken(address _token) external onlyOwner {
+    function emergencyWithdrawToken(
+        address _token
+    ) external onlyOwnerOrAuthorized {
         IERC20 token = IERC20(_token);
         uint256 balance = token.balanceOf(address(this));
         require(balance > 0, "No tokens to withdraw");
@@ -535,8 +541,9 @@ contract BifyLaunchpadCore is Ownable, ReentrancyGuard, Pausable {
             WhitelistManagerFactory whitelistFactory = WhitelistManagerFactory(
                 factory
             );
-            whitelistContract = whitelistFactory.createWhitelistManager(
-                _whitelistName
+            whitelistContract = whitelistFactory.createWhitelistManagerForOwner(
+                _whitelistName,
+                _creator
             );
         }
 
@@ -584,8 +591,12 @@ contract BifyLaunchpadCore is Ownable, ReentrancyGuard, Pausable {
 
         // Increment collection count
         _getStorage().incrementCollectionCount();
+        _getStorage().setCollectionByIndex(
+            _getStorage().collectionCount(),
+            collectionAddress
+        );
 
-        // Register with marketplace for fee differentiation
+        // Register with marketplace if address is set (emits events on success/failure)
         _registerWithMarketplace(collectionAddress);
 
         // Emit events
@@ -778,7 +789,7 @@ contract BifyLaunchpadCore is Ownable, ReentrancyGuard, Pausable {
         // Increment collection count
         _getStorage().incrementCollectionCount();
 
-        // Register with marketplace for fee differentiation
+        // Register with marketplace if address is set (emits events on success/failure)
         _registerWithMarketplace(collectionAddress);
 
         emit CollectionCreated(
@@ -807,6 +818,35 @@ contract BifyLaunchpadCore is Ownable, ReentrancyGuard, Pausable {
         return
             _getStorage().isCollectionCreator(_collection, _user) ||
             _user == owner();
+    }
+
+    /**
+     * @notice Internal function to register a collection with the marketplace
+     * @param _collection Collection address to register
+     * @return success Whether the registration was successful
+     */
+    function _registerWithMarketplace(
+        address _collection
+    ) internal returns (bool success) {
+        if (_marketplaceAddress != address(0)) {
+            try
+                IBifyMarketplace(_marketplaceAddress)
+                    .registerLaunchpadCollection(_collection)
+            {
+                emit MarketplaceRegistrationSuccess(_collection);
+                return true;
+            } catch Error(string memory reason) {
+                emit MarketplaceRegistrationFailed(_collection, reason);
+                return false;
+            } catch (bytes memory /* lowLevelData */) {
+                emit MarketplaceRegistrationFailed(
+                    _collection,
+                    "Unknown error - low level failure"
+                );
+                return false;
+            }
+        }
+        return false;
     }
 
     /**

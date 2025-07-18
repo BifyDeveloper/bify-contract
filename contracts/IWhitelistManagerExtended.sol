@@ -7,16 +7,6 @@ pragma solidity ^0.8.20;
  */
 interface IWhitelistManagerExtended {
     /**
-     * @notice Whitelist tier levels
-     */
-    enum TierLevel {
-        Invalid,
-        Tier1,
-        Tier2,
-        Tier3
-    }
-
-    /**
      * @notice Create a new whitelist tier
      * @param _merkleRoot Merkle root of addresses in this tier
      * @param _startTime Start time for this tier
@@ -56,19 +46,22 @@ interface IWhitelistManagerExtended {
     /**
      * @notice Add an address to the direct whitelist
      * @param _user Address to add
-     * @param _tier Tier level
+     * @param _maxTierAccess Maximum tier access level for this user (0 means not whitelisted)
      */
-    function addToDirectWhitelist(address _user, TierLevel _tier) external;
+    function addToDirectWhitelist(
+        address _user,
+        uint256 _maxTierAccess
+    ) external;
 
     /**
      * @notice Batch add addresses to the direct whitelist
      * @param _users Array of addresses to add
-     * @param _tier Tier level for all addresses
+     * @param _maxTierAccess Maximum tier access level for all addresses (0 means not whitelisted)
      * @return successCount Number of successfully added addresses
      */
     function batchAddToDirectWhitelist(
         address[] calldata _users,
-        TierLevel _tier
+        uint256 _maxTierAccess
     ) external returns (uint256 successCount);
 
     /**
@@ -153,7 +146,9 @@ interface IWhitelistManagerExtended {
     /**
      * @notice Get the direct whitelist tier for a user
      * @param user The address to check
-     * @return tierLevel The tier level (uint8)
+     * @return maxTierAccess The maximum tier access level (0 means not whitelisted)
      */
-    function getDirectWhitelistTier(address user) external view returns (uint8);
+    function getDirectWhitelistTier(
+        address user
+    ) external view returns (uint256 maxTierAccess);
 }

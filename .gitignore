@@ -102,22 +102,9 @@ hardhat.config.local.js
 hardhat.config.local.ts
 
 # Deployment scripts with sensitive data
-scripts/deploy*.js
-scripts/verify*.js
-scripts/*deployment*.js
-scripts/utils/
-scripts/check-*
-scripts/*-query-*
-scripts/deploy.js
+scripts/*
 # Deployment documentation (may contain sensitive addresses/keys)
-SETUP.md
-DEPLOYMENT.md
-MAINNET_DEPLOYMENT_GUIDE.md
-MAINNET_DEPLOYMENT_REVIEW.md
-*DEPLOYMENT*.md
-*deployment*.md
-VERIFICATION_ISSUES.md
-BASE_SEPOLIA_VERIFICATION.md
+*.md
 
 # Encoded arguments (often contain sensitive deployment data)
 encoded-args/
